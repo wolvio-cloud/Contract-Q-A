@@ -2,6 +2,8 @@ import { logger } from "../../../lib/logger.ts";
 import { env } from "../../../lib/env.ts";
 import { retrieve, type RetrievalChunk } from "../../../lib/rag/retriever.ts";
 import { buildSystemPrompt } from "../../../lib/rag/system-prompt.ts";
+import { enforceCitationDiscipline } from "../../../lib/rag/answer-guard.ts";
+import { RAG_CONFIG } from "../../../lib/rag/config.ts";
 import { extractCitationMarkers } from "../../../lib/rag/citations.ts";
 import { supabase } from "../../../lib/supabase/service.ts";
 import { demoCorpus } from "../../../lib/rag/demo-corpus.ts";
@@ -16,7 +18,7 @@ interface QaRequest {
   conversation_id: string;
 }
 
-const COST_LIMIT_USD = 0.1;
+const COST_LIMIT_USD = RAG_CONFIG.generation.costCapUsd;
 
 function parseRequest(value: unknown): QaRequest {
   if (!value || typeof value !== "object") {
@@ -149,7 +151,8 @@ export async function POST(req: Request): Promise<Response> {
 
     const retrieval = await retrieve(lastUserMessage.content, supabase ? {} : { corpus: demoCorpus, matchThreshold: 0.1, matchCount: 20 });
     // TODO(qa-phase-3): Move prompt/version controls into shared config once UI is wired.
-    const systemPrompt = buildSystemPrompt(retrieval.context);
+    const trimmedContext = retrieval.context.slice(0, RAG_CONFIG.generation.maxContextChars);
+    const systemPrompt = buildSystemPrompt(trimmedContext, retrieval.classification, lastUserMessage.content);
     const modelName = retrieval.classification.complexity === "high" ? "claude-opus-4-5" : "claude-sonnet-4-5";
 
     let responseText = "";
@@ -165,7 +168,7 @@ export async function POST(req: Request): Promise<Response> {
           model: anthropic.anthropic(modelName),
           system: systemPrompt,
           prompt: lastUserMessage.content,
-          maxTokens: 1800,
+          maxTokens: RAG_CONFIG.generation.maxTokens,
         });
 
         responseText = result.text;
@@ -189,7 +192,9 @@ export async function POST(req: Request): Promise<Response> {
       logger.warn({ operation: "qa.cost.cap", estimated_cost_usd: estimatedCost, cap_usd: COST_LIMIT_USD });
     }
 
-    const citations = extractCitationMarkers(responseText, retrieval.chunks);
+    const guarded = enforceCitationDiscipline(responseText, retrieval.chunks);
+    responseText = guarded.text;
+    const citations = guarded.citations;
     const durationMs = Date.now() - startedAt;
 
     await persistAssistantMessage({
@@ -213,6 +218,7 @@ export async function POST(req: Request): Promise<Response> {
       meta: {
         model: modelName,
         citations_count: citations.length,
+      citation_guard_applied: guarded.guarded,
         retrieved_count: retrieval.chunks.length,
       },
     });
@@ -223,6 +229,7 @@ export async function POST(req: Request): Promise<Response> {
       duration_ms: durationMs,
       cost_usd: Number(estimatedCost.toFixed(6)),
       citations_count: citations.length,
+      citation_guard_applied: guarded.guarded,
     });
 
     const tokens = responseText.split(/(\s+)/).filter(Boolean);

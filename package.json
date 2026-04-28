@@ -10,7 +10,8 @@
     "test:chunker": "node --experimental-strip-types scripts/test-chunker.ts",
     "test:retriever-filter": "node --experimental-strip-types scripts/test-retriever-filters.ts",
     "test:citations": "node --experimental-strip-types scripts/test-citations.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:prompt-guard": "node --experimental-strip-types scripts/test-prompt-guard.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^1.2.8",

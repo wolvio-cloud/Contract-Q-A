@@ -3,6 +3,7 @@ import { supabase } from "../supabase/service.ts";
 import { embedTexts } from "./embeddings.ts";
 import { classifyQuery } from "./query-classifier.ts";
 import { rerank, type RerankableChunk } from "./reranker.ts";
+import { RAG_CONFIG } from "./config.ts";
 
 export interface RetrievalChunk extends RerankableChunk {}
 
@@ -125,8 +126,8 @@ export async function retrieve(question: string, options: RetrievalOptions = {})
   logger.info({ operation: "rag.classify", question, classification, correlationId });
 
   const queryEmbedding = (await embedTexts([question])).vectors[0];
-  const matchThreshold = options.matchThreshold ?? 0.4;
-  const matchCount = options.matchCount ?? 20;
+  const matchThreshold = options.matchThreshold ?? RAG_CONFIG.retrieval.matchThreshold;
+  const matchCount = options.matchCount ?? RAG_CONFIG.retrieval.candidateCount;
 
   let candidates: RetrievalChunk[] = [];
 
@@ -148,27 +149,30 @@ export async function retrieve(question: string, options: RetrievalOptions = {})
   }
 
   const vectorOrdered = [...candidates].sort(deterministicSort).slice(0, 8);
-  const reranked = await rerank(question, candidates, { topN: 8, timeoutMs: 2_000 });
+  const reranked = await rerank(question, candidates, { topN: RAG_CONFIG.retrieval.rerankTopN, timeoutMs: 2_000 });
 
   if (reranked.usedFallback) {
     logger.warn({ operation: "rag.retrieve.fallback", correlationId, reason: "rerank-fallback" });
   }
 
   const durationMs = Date.now() - startedAt;
-  const context = buildCitationContext(reranked.chunks);
+
+  const topSimilarity = reranked.chunks[0]?.similarity ?? 0;
+  const filteredReranked = topSimilarity < RAG_CONFIG.retrieval.offTopicTopSimilarityThreshold ? [] : reranked.chunks;
+  const context = buildCitationContext(filteredReranked);
 
   logger.info({
     operation: "rag.retrieve.done",
     correlationId,
     candidates_count: candidates.length,
-    reranked_count: reranked.chunks.length,
-    top_similarity: reranked.chunks[0]?.similarity ?? null,
+    reranked_count: filteredReranked.length,
+    top_similarity: topSimilarity,
     duration_ms: durationMs,
   });
 
   return {
     context,
-    chunks: reranked.chunks,
+    chunks: filteredReranked,
     vectorOrdered,
     classification,
     correlationId,
