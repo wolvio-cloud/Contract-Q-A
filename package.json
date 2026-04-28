@@ -1,0 +1,23 @@
+{
+  "name": "contract-q-a",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "index:contracts": "tsx scripts/index-contracts.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^1.2.8",
+    "@supabase/supabase-js": "^2.49.8",
+    "ai": "^4.3.16",
+    "openai": "^4.104.0",
+    "pino": "^9.7.0",
+    "zod": "^3.25.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
+  }
+}
